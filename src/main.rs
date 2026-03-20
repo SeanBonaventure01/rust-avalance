@@ -14,8 +14,33 @@ fn main() {
     let request = build_open_topo_get_request(-122.22, -122.14, 46.22, 46.16, &open_topo_api_key);
     println!("Making request for mt st helens...");
     let open_topo_req = reqwest::blocking::get(request);
-    match open_topo_req {
-        Ok(res) => println!("Got a response! Status: {}", res.status()),
-        Err(e) => println!("Got an error: {}", e),
-    }
+    let Ok(response) = open_topo_req else {
+        println!("Got an error return!");
+        return;
+    };
+
+    println!("Response code: {}", response.status());
+
+    let geo_tiff = match response.bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            println!("Unable to get bytes from response! Code: {}", e);
+            return;
+        }
+    };
+
+    println!("Byte len: {}", geo_tiff.len());
+    println!("Writing to file...");
+    let Ok(_) = std::fs::write("output.tif", &geo_tiff) else {
+        println!("Failed to write file!");
+        return;
+    };
+
+    let Ok(gdal_dataset) = gdal::Dataset::open("output.tif") else {
+        println!("Failed to process dataset!");
+        return;
+    };
+    println!("Raster count: {}", gdal_dataset.raster_count());
+    let (width, height) = gdal_dataset.raster_size();
+    println!("Raster width: {width}, height: {height}");
 }
