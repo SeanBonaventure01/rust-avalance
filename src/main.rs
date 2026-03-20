@@ -43,4 +43,29 @@ fn main() {
     println!("Raster count: {}", gdal_dataset.raster_count());
     let (width, height) = gdal_dataset.raster_size();
     println!("Raster width: {width}, height: {height}");
+    println!("Projection: {}", gdal_dataset.projection());
+    let Ok(geo_transform) = gdal_dataset.geo_transform() else {
+        println!("Couldn't get geo transform!");
+        return;
+    };
+
+    println!("Upperleft (x, y): ({}, {}). W-E resolution: {}. N-S resolution: {}", geo_transform[0], geo_transform[3], geo_transform[1], geo_transform[5]);
+
+    let Ok(raster) = gdal_dataset.rasterband(1) else {
+        println!("Couldn't fetch raster");
+        return;
+    };
+    let (raster_cols, raster_rows) = raster.size();
+    println!("Raster size: Cols: {raster_cols}, Rows: {raster_rows}");
+    println!("Band type: {}", raster.band_type());
+    let mut values: Vec<f32> = vec![0.0; raster_cols * raster_rows];
+    let Ok(_) = raster.read_into_slice::<f32>((0, 0), raster.size(), (raster_cols, raster_rows), values.as_mut_slice(), None) else {
+        println!("Failed to get values into vector!");
+        return;
+    };
+
+    for i in 0..10 {
+        println!("Val {i}: {}m", values[i]);
+    }
+
 }
