@@ -4,6 +4,25 @@ fn build_open_topo_get_request(west_lat: f32, east_lat: f32, north_long: f32, so
        south={}&north={}&west={}&east={}&outputFormat=GTiff&API_Key={}", south_long, north_long, west_lat, east_lat, api_key) 
 }
 
+fn get_utm_zone_from_longitude(longitude: f32) -> i32
+{
+    let deg_per_utm = 6.0;
+    let adj_lon = if longitude < 0.0 {longitude + 360.0} else {longitude};
+    (((adj_lon - 180.0) / deg_per_utm + 1.0) as i32).abs()
+}
+
+fn get_epsg_utm_str_from_lat_long((lon, lat): (f32, f32)) -> String
+{
+    let utm_zone = get_utm_zone_from_longitude(lon);
+    let north_code = if lat > 90.0 {7} else {6};
+    format!("EPSG:32{north_code}{:02}", utm_zone)
+}
+
+fn compute_slope_angle(elevation_vec: &Vec<f32>, x_dim: usize, y_dim: usize) -> Vec<f32>
+{
+    vec![0.0; x_dim * y_dim]
+}
+
 fn main() {
     let _ = dotenvy::dotenv();
     let Ok(open_topo_api_key) =  dotenvy::var("OPEN_TOPO_KEY") else {
@@ -40,10 +59,7 @@ fn main() {
         println!("Failed to process dataset!");
         return;
     };
-    println!("Raster count: {}", gdal_dataset.raster_count());
     let (width, height) = gdal_dataset.raster_size();
-    println!("Raster width: {width}, height: {height}");
-    println!("Projection: {}", gdal_dataset.projection());
     let Ok(geo_transform) = gdal_dataset.geo_transform() else {
         println!("Couldn't get geo transform!");
         return;
@@ -56,16 +72,38 @@ fn main() {
         return;
     };
     let (raster_cols, raster_rows) = raster.size();
-    println!("Raster size: Cols: {raster_cols}, Rows: {raster_rows}");
-    println!("Band type: {}", raster.band_type());
     let mut values: Vec<f32> = vec![0.0; raster_cols * raster_rows];
     let Ok(_) = raster.read_into_slice::<f32>((0, 0), raster.size(), (raster_cols, raster_rows), values.as_mut_slice(), None) else {
         println!("Failed to get values into vector!");
         return;
     };
 
-    for i in 0..10 {
-        println!("Val {i}: {}m", values[i]);
-    }
+    //let slop_angle = compute_slope_angle(&values, raster_cols, raster_rows);
+    let mut slope_opts = gdal::raster::processing::dem::SlopeOptions::new();
+    slope_opts.with_algorithm(gdal::raster::processing::dem::DemSlopeAlg::Horn).with_scale(111120.0);
+    let Ok(slope_ds) = gdal::raster::processing::dem::slope(&gdal_dataset, std::path::Path::new("slope-angle.tiff"), &slope_opts) else {
+        println!("Couldn't convert to slope!");
+        return;
+    };
 
+    let lat_long_test: (f32, f32) = ( -122.2, 47.6);
+    let utm_str = get_epsg_utm_str_from_lat_long(lat_long_test);
+    // Convert from WGS84 (lat/lon) to UTM. EPSG codes are the standard defintions of each coord
+    // system
+    let proj_transform = match proj::Proj::new_known_crs("EPSG:4326", &utm_str, None) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Couldn't create projection! Error: {}", e);
+            return;
+        }
+    };
+
+    let utm_coords = match proj_transform.project(lat_long_test, false) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Failed to convert! Error : {}", e);
+            return;
+        }
+    };
+    println!("Seattle UTM Coords: {:?}", utm_coords);
 }
