@@ -88,6 +88,48 @@ fn compute_slope_angle_from_vector(input_elevations: &Vec<f32>, (x_size, y_size)
     Ok(output_slope_angle)
 }
 
+fn convert_slope_vector_to_dataset(original_dataset: &gdal::Dataset, slope_data: Vec<f32>) -> Result<gdal::Dataset, Box<dyn std::error::Error>>
+{
+    // MEM driver just creates a dataset in memory as opposed to GTiff which requires a file
+    let driver = gdal::DriverManager::get_driver_by_name("MEM")?;
+    // Get the original datasets metadata that we need to copy to the new dataset
+    let og_projection = original_dataset.projection();
+    let og_spatial_ref = original_dataset.spatial_ref()?;
+    let og_geo_transform = original_dataset.geo_transform()?;
+    let (original_x, original_y) = original_dataset.rasterband(1)?.size();
+    let mut new_dataset = driver.create_with_band_type::<f32, _>("", original_x, original_y, 1)?;
+    let _ = new_dataset.set_geo_transform(&og_geo_transform)?;
+    let _ = new_dataset.set_spatial_ref(&og_spatial_ref)?;
+    let _ = new_dataset.set_projection(&og_projection)?;
+
+    let mut rasterband = new_dataset.rasterband(1)?;
+    let mut buff = gdal::raster::Buffer::new((original_x, original_y), slope_data);
+    rasterband.write((0, 0), (original_x, original_y), &mut buff);
+    let _ = new_dataset.flush_cache();
+
+    Ok(new_dataset)
+}
+
+fn save_slope_to_file(slope_dataset: &gdal::Dataset, file_path: &str) -> Result<(), Box<dyn std::error::Error>>
+{
+    let driver = gdal::DriverManager::get_driver_by_name("GTiff")?;
+    let creation_options = gdal::raster::RasterCreationOptions::new();
+    let mut gtiff_dataset = slope_dataset.create_copy(&driver, std::path::Path::new(file_path), &creation_options)?;
+    let _ = gtiff_dataset.flush_cache();
+    Ok(())
+}
+
+fn get_slope_angle_from_point(slope_dataset: &gdal::Dataset, (lat, lon) : (f64, f64)) -> Result<f32, Box<dyn std::error::Error>>
+{
+    let raster_band = slope_dataset.rasterband(1)?;
+    let (x_size, y_size) = raster_band.size();
+    let geo_transform = slope_dataset.geo_transform()?;
+    let (x_index, y_index) = (((lon - geo_transform[0])/geo_transform[1]) as isize, ((lat - geo_transform[3])/geo_transform[5]) as isize);
+    let mut buff = vec![0.0; 1];
+    let _ = raster_band.read_into_slice((x_index, y_index), (1, 1), (1, 1), &mut buff, None)?;
+    Ok(buff[0])
+}
+
 fn compute_slope_angle_from_dataset(slope_dataset: &gdal::Dataset) -> Result<Vec<f32>, Box<dyn std::error::Error>>
 {
     // 1. Read into vector of elevations
@@ -152,10 +194,9 @@ fn main() {
         return;
     };
 
-    //let slop_angle = compute_slope_angle(&values, raster_cols, raster_rows);
     let mut slope_opts = gdal::raster::processing::dem::SlopeOptions::new();
     slope_opts.with_algorithm(gdal::raster::processing::dem::DemSlopeAlg::Horn).with_scale(111120.0);
-    let Ok(slope_ds) = gdal::raster::processing::dem::slope(&gdal_dataset, std::path::Path::new("slope-angle.tiff"), &slope_opts) else {
+    let Ok(slope_ds) = gdal::raster::processing::dem::slope(&gdal_dataset, std::path::Path::new("slope-angle.tif"), &slope_opts) else {
         println!("Couldn't convert to slope!");
         return;
     };
@@ -167,9 +208,22 @@ fn main() {
             return;
         }
     };
-    println!("Computed slope angles! First few values:");
-    for i in 866..876
-    {
-        println!("{}", slope_angles[i]);
-    }
+    
+    let Ok(slope_dataset) = convert_slope_vector_to_dataset(&gdal_dataset, slope_angles) else {
+        println!("Unable to make new dataset!");
+        return;
+    };
+
+    let _ = save_slope_to_file(&slope_dataset, "manual_slope_angles.tif");
+
+    let (lat, long): (f64, f64) = (46.18476, -122.18534);
+    let Ok(gdal_slope_angle) = get_slope_angle_from_point(&slope_ds, (lat, long)) else {
+        println!("Unable to get slope angle for gdal dataset");
+        return;
+    };
+    let Ok(manual_slope_angle) = get_slope_angle_from_point(&slope_dataset, (lat, long)) else {
+        println!("Unable to get slope angle for manual dataset");
+        return;
+    };
+    println!("Gdal slope angle: {gdal_slope_angle}, manual slope angle: {manual_slope_angle}");
 }
