@@ -160,6 +160,52 @@ fn compute_slope_angle_from_dataset(slope_dataset: &gdal::Dataset) -> Result<Vec
     return compute_slope_angle_from_vector(&values, (raster_cols, raster_rows), (x_res, y_res));
 }
 
+fn compute_contours_from_slope_angles(slope_dataset: &gdal::Dataset) -> Result<geo_types::geometry::MultiPolygon<f64>, Box<dyn std::error::Error>>
+{
+    let Ok(raster) = slope_dataset.rasterband(1) else {
+        return Err("Couldn't fetch raster".into());
+    };
+
+    let (raster_cols, raster_rows) = raster.size();
+    let mut values: Vec<f32> = vec![0.0; raster_cols * raster_rows];
+    let Ok(_) = raster.read_into_slice::<f32>((0, 0), raster.size(), (raster_cols, raster_rows), values.as_mut_slice(), None) else {
+        return Err("Couldn't read into slice".into());
+    };
+
+    let contour_builder = contour::ContourBuilder::new(raster_cols, raster_rows, true);
+    // Todo: un hardcode avalanche value
+    let slice: &[f64] = &values.iter().map(|&x| x as f64).collect::<Vec<f64>>();
+    let contours = contour_builder.contours(&slice, &[30.0])?;
+    // The contours are in arbitrary x/y units so we need to convert to lat/long using the dataset
+    // Seems like we have to manually do this
+    let geo_transform = slope_dataset.geo_transform()?;
+    let (x_origin, y_origin, x_res, y_res) = (geo_transform[0], geo_transform[3], geo_transform[1], geo_transform[5]); 
+    let projected_contours: geo_types::geometry::MultiPolygon = contours[0].geometry().iter().map(|polygon: &geo_types::geometry::Polygon<f64>| {
+        // Exterior is what we really care about. A line containing the outer boundary of our
+        // polygon
+        let projected_exterior: geo_types::geometry::LineString<f64> = polygon.exterior().coords().map(|coord| geo_types::geometry::Coord {
+            x : x_origin + (coord.x*x_res),
+            y : y_origin + (coord.y*y_res),
+        }).collect();
+
+        // Interior is for inner holes
+        // We need .iter() here becuse this just returns a slice. This gives us the actual
+        // linestring we can then map the coords to
+        let projected_interiors: Vec<geo_types::geometry::LineString<f64>> = polygon
+            .interiors()
+            .iter()
+            .map(|interior| {
+                interior.coords().map(|coord| geo_types::geometry::Coord {
+                    x : x_origin + (coord.x*x_res),
+                    y : y_origin + (coord.y*y_res),
+                }).collect()
+        }).collect();
+        geo_types::geometry::Polygon::new(projected_exterior, projected_interiors) 
+    }).collect();
+
+    Ok(projected_contours)
+}
+
 fn main() {
     let _ = dotenvy::dotenv();
     let Ok(open_topo_api_key) =  dotenvy::var("OPEN_TOPO_KEY") else {
@@ -216,17 +262,26 @@ fn main() {
         println!("Unable to make new dataset!");
         return;
     };
-
-    let _ = save_slope_to_file(&slope_dataset, "manual_slope_angles.tif");
-
-    let (lat, long): (f64, f64) = (46.18260, -122.18900);
-    let Ok(gdal_slope_angle) = get_slope_angle_from_point(&slope_ds, (lat, long)) else {
-        println!("Unable to get slope angle for gdal dataset");
+    let Ok(contours) = compute_contours_from_slope_angles(&slope_dataset) else {
+        println!("Unable to get contours!");
         return;
     };
-    let Ok(manual_slope_angle) = get_slope_angle_from_point(&slope_dataset, (lat, long)) else {
-        println!("Unable to get slope angle for manual dataset");
+
+    let geometry = geojson::Geometry::from(&contours);
+    let feature = geojson::Feature {
+        geometry: Some(geometry),
+        ..geojson::Feature::default()
+    };
+
+    // Wrap in a FeatureCollection if you have multiple
+    let geojson = geojson::GeoJson::Feature(feature);
+    
+    // Serialize to string
+    let geojson_string = geojson.to_string();
+    
+    // Write to file
+    let _ = std::fs::write("output.geojson", geojson_string) else {
+        println!("Failed to write to file!");
         return;
     };
-    println!("Gdal slope angle: {gdal_slope_angle}, manual slope angle: {manual_slope_angle}");
 }
