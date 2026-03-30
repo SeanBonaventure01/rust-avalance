@@ -41,16 +41,17 @@ fn compute_single_slope_angle(input_data: &[Option<f32>; 9], (x_res_m, y_res_m) 
 {
     // See https://pro.arcgis.com/en/pro-app/3.4/tool-reference/spatial-analyst/how-slope-works.htm
     // on how this equation works
-    let wght1 = unwrap_weight(input_data[2]) + 2.0*unwrap_weight(input_data[5]) + unwrap_weight(input_data[8]);
-    let wght2 = unwrap_weight(input_data[0]) + 2.0*unwrap_weight(input_data[3]) + unwrap_weight(input_data[6]);
+    // For now we assume we are only working on data with all valid cells (ie, non edges)
+    let wght1 = 4.0; //unwrap_weight(input_data[2]) + 2.0*unwrap_weight(input_data[5]) + unwrap_weight(input_data[8]);
+    let wght2 = 4.0; //unwrap_weight(input_data[0]) + 2.0*unwrap_weight(input_data[3]) + unwrap_weight(input_data[6]);
     // I think technically wght 3 and 4 are swapped according to the equation but lets just go with
     // it
-    let wght3 = unwrap_weight(input_data[0]) + 2.0*unwrap_weight(input_data[1]) + unwrap_weight(input_data[2]);
-    let wght4 = unwrap_weight(input_data[6]) + 2.0*unwrap_weight(input_data[7]) + unwrap_weight(input_data[8]);
-    let x_slope_angle = ((extract_elevation(input_data[2]) + 2.0*extract_elevation(input_data[5]) + extract_elevation(input_data[8])*4.0)/(if wght1 > 0.0 {wght1} else {1.0})
-        - ((extract_elevation(input_data[0]) + 2.0*extract_elevation(input_data[3]) + extract_elevation(input_data[6])*4.0)/(if wght2 > 0.0 {wght2} else {0.0}))) / (8.0 * x_res_m as f32);
-    let y_slope_angle = ((extract_elevation(input_data[6]) + 2.0*extract_elevation(input_data[7]) + extract_elevation(input_data[8])*4.0)/(if wght4 > 0.0 {wght4} else {1.0})
-        - ((extract_elevation(input_data[0]) + 2.0*extract_elevation(input_data[1]) + extract_elevation(input_data[2])*4.0)/(if wght3 > 0.0 {wght3} else {1.0}))) / (8.0 * y_res_m as f32);
+    let wght3 = 4.0; //unwrap_weight(input_data[0]) + 2.0*unwrap_weight(input_data[1]) + unwrap_weight(input_data[2]);
+    let wght4 = 4.0; //unwrap_weight(input_data[6]) + 2.0*unwrap_weight(input_data[7]) + unwrap_weight(input_data[8]);
+    let x_slope_angle = (((extract_elevation(input_data[2]) + 2.0*extract_elevation(input_data[5]) + extract_elevation(input_data[8]))*4.0)/(if wght1 > 0.0 {wght1} else {1.0})
+        - ((extract_elevation(input_data[0]) + 2.0*extract_elevation(input_data[3]) + extract_elevation(input_data[6]))*4.0)/(if wght2 > 0.0 {wght2} else {0.0})) / (8.0 * x_res_m as f32);
+    let y_slope_angle = (((extract_elevation(input_data[6]) + 2.0*extract_elevation(input_data[7]) + extract_elevation(input_data[8]))*4.0)/(if wght4 > 0.0 {wght4} else {1.0})
+        - ((extract_elevation(input_data[0]) + 2.0*extract_elevation(input_data[1]) + extract_elevation(input_data[2]))*4.0)/(if wght3 > 0.0 {wght3} else {1.0})) / (8.0 * y_res_m as f32);
     ((x_slope_angle*x_slope_angle + y_slope_angle*y_slope_angle).sqrt()).atan() * 57.29578
  
 }
@@ -152,7 +153,9 @@ fn compute_slope_angle_from_dataset(slope_dataset: &gdal::Dataset) -> Result<Vec
     let mut coords: [(f64, f64); 2] = [(geo_transform[0], geo_transform[3]), (geo_transform[0] + (geo_transform[1]*(raster_cols as f64)), geo_transform[3])];
     let hav_distance = Haversine.distance(coords[0].into(), coords[1].into());
     // Lattitude is a constant 111,111m/degree
+    // let (x_res, y_res) = (1.0 * geo_transform[1] * 111111.0, -1.0 * geo_transform[5] * 111111.0);
     let (x_res, y_res) : (f64, f64) = (hav_distance/(raster_cols as f64), -1.0 * geo_transform[5] * 111111.0);
+    println!("Xres: {x_res}, yres: {y_res}");
 
     return compute_slope_angle_from_vector(&values, (raster_cols, raster_rows), (x_res, y_res));
 }
@@ -216,7 +219,7 @@ fn main() {
 
     let _ = save_slope_to_file(&slope_dataset, "manual_slope_angles.tif");
 
-    let (lat, long): (f64, f64) = (46.18476, -122.18534);
+    let (lat, long): (f64, f64) = (46.18260, -122.18900);
     let Ok(gdal_slope_angle) = get_slope_angle_from_point(&slope_ds, (lat, long)) else {
         println!("Unable to get slope angle for gdal dataset");
         return;
