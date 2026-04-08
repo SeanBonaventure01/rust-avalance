@@ -47,8 +47,10 @@ fn get_from_args(args: &Args, open_topo_api_key: &String) {
     // Serialize to string
     let geojson_string = requested_terrain.geo_json_out.to_string();
     
+    let output_path_str: &String = &args.output_path.as_ref().unwrap();
+
     // Write to file
-    let _ = std::fs::write("output.geojson", geojson_string) else {
+    let _ = std::fs::write(output_path_str, geojson_string) else {
         println!("Failed to write to file!");
         return;
     };
