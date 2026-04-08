@@ -276,5 +276,19 @@ impl AvalancheTerrain {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn integration_test() {
+        // I know this is naughty and we shouldn't be doing actual API requests for this test but I
+        // am lazy
+        let _ = dotenvy::dotenv();
+        let open_topo_api_key =  dotenvy::var("OPEN_TOPO_KEY").unwrap();
+
+        let st_helens_terrain = crate::slope_angles::AvalancheTerrain::from_lat_lon(open_topo_api_key.as_str(), (46.2168, -122.1595, 46.17836, -122.2144)).unwrap();
+    }
+}
     
     
