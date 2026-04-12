@@ -181,6 +181,100 @@
     #response-box.has-content { color: var(--text); }
     #response-box.error { color: #f87171; border-color: #f87171; }
 
+    /* Area selection */
+    #select-area-btn {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 10px;
+      color: var(--accent);
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.8rem;
+      cursor: pointer;
+      letter-spacing: 0.06em;
+      transition: background 0.15s, color 0.15s;
+    }
+    #select-area-btn.active {
+      background: var(--accent);
+      color: var(--bg);
+    }
+    #select-area-btn:hover:not(.active) { background: rgba(74,240,164,0.1); }
+
+    #points-list {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+    #points-list span { color: var(--accent); }
+
+    #avy-btn {
+      width: 100%;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: var(--radius);
+      padding: 10px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      letter-spacing: 0.06em;
+      transition: opacity 0.15s;
+    }
+    #avy-btn:hover { opacity: 0.85; }
+    #avy-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #clear-btn {
+      width: 100%;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 7px;
+      color: var(--muted);
+      font-family: 'Syne', sans-serif;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #clear-btn:hover { border-color: #f87171; color: #f87171; }
+
+    #test-btn {
+      width: 100%;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 7px;
+      color: var(--muted);
+      font-family: 'Syne', sans-serif;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #test-btn:hover { border-color: var(--accent); color: var(--accent); }
+    #test-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #test-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 7px 10px;
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 0.78rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #test-input:focus { border-color: var(--accent); }
+    #test-input::placeholder { color: var(--muted); }
+
     .zoom-row {
       display: flex;
       align-items: center;
@@ -259,6 +353,12 @@
 
   <aside id="sidebar">
 
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div class="panel-title">Test Endpoint</div>
+      <button id="test-btn">POST /api/avalanche-test</button>
+      <textarea id="test-response" readonly rows="4" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;color:var(--muted);font-family:'Space Mono',monospace;font-size:0.75rem;resize:none;outline:none;white-space:pre-wrap;word-break:break-word;line-height:1.6;"></textarea>
+    </div>
+
     <div>
       <div class="panel-title">Zoom</div>
       <div class="zoom-row">
@@ -269,9 +369,17 @@
     </div>
 
     <div style="display:flex;flex-direction:column;gap:8px;flex:1;">
-      <div class="panel-title">Avalanche Test</div>
-      <textarea id="msg-input" placeholder="Enter a message…"></textarea>
-      <button id="send-btn">Send</button>
+      <div class="panel-title">Avalanche Terrain</div>
+
+      <button id="select-area-btn">Draw Area</button>
+
+      <div id="points-list">
+        Click "Draw Area" then drag on the map to draw a rectangle. Drag the handles to resize.
+      </div>
+
+      <button id="avy-btn" disabled>Get Avalanche Terrain</button>
+      <button id="clear-btn">Clear Selection</button>
+
       <div class="panel-title" style="margin-top:4px;">Response</div>
       <div id="response-box">Waiting for response…</div>
     </div>
@@ -336,47 +444,250 @@
     if (e.key === 'Enter') doSearch();
   });
 
-  // Send to /avalance-test
-  const sendBtn     = document.getElementById('send-btn');
-  const msgInput    = document.getElementById('msg-input');
-  const responseBox = document.getElementById('response-box');
+  // ── Area selection (drag-to-draw + resizable handles) ────────────
+  const selectAreaBtn = document.getElementById('select-area-btn');
+  const avyBtn        = document.getElementById('avy-btn');
+  const clearBtn      = document.getElementById('clear-btn');
+  const pointsList    = document.getElementById('points-list');
+  const responseBox   = document.getElementById('response-box');
 
-  async function sendMessage() {
-    const message = msgInput.value.trim();
-    if (!message) return;
+  let drawing         = false;   // drag-to-draw mode active
+  let drawStart       = null;    // latlng where mousedown began
+  let rectLayer       = null;    // L.Rectangle
+  let handles         = [];      // L.Marker handles for resizing
+  let rectBounds      = null;    // current L.LatLngBounds
+  let avyGeoJsonLayer = null;
 
-    sendBtn.disabled = true;
+  // Transparent drag handle icon
+  const handleIcon = L.divIcon({
+    className: '',
+    html: '<div style="width:12px;height:12px;background:#4af0a4;border:2px solid #0d0f14;border-radius:2px;cursor:grab;"></div>',
+    iconSize: [12, 12],
+    iconAnchor: [6, 6]
+  });
+
+  function updatePointsUI() {
+    if (!rectBounds) {
+      pointsList.innerHTML = 'Click "Draw Area" then drag on the map to draw a rectangle. Drag the handles to resize.';
+      avyBtn.disabled = true;
+      return;
+    }
+    const n = rectBounds.getNorthWest();
+    const ne = rectBounds.getNorthEast();
+    const se = rectBounds.getSouthEast();
+    const sw = rectBounds.getSouthWest();
+    pointsList.innerHTML =
+      `NW: <span>${n.lat.toFixed(5)}, ${n.lng.toFixed(5)}</span><br>` +
+      `NE: <span>${ne.lat.toFixed(5)}, ${ne.lng.toFixed(5)}</span><br>` +
+      `SE: <span>${se.lat.toFixed(5)}, ${se.lng.toFixed(5)}</span><br>` +
+      `SW: <span>${sw.lat.toFixed(5)}, ${sw.lng.toFixed(5)}</span>`;
+    avyBtn.disabled = false;
+  }
+
+  function redrawRect() {
+    if (rectLayer) { map.removeLayer(rectLayer); }
+    rectLayer = L.rectangle(rectBounds, {
+      color: '#4af0a4',
+      weight: 2,
+      fillColor: '#4af0a4',
+      fillOpacity: 0.08,
+      dashArray: '6 4',
+      interactive: false
+    }).addTo(map);
+  }
+
+  // 8 handles: corners (NW, NE, SE, SW) + edge midpoints (N, E, S, W)
+  // Each handle is described by which bounds edges it controls.
+  // constrainFn(latlng, bounds) → new L.LatLngBounds
+  const handleDefs = [
+    { id: 'nw', pos: b => b.getNorthWest(), constrain: (ll, b) => L.latLngBounds([[ll.lat, ll.lng], [b.getSouth(), b.getEast()]]) },
+    { id: 'ne', pos: b => b.getNorthEast(), constrain: (ll, b) => L.latLngBounds([[ll.lat, b.getWest()], [b.getSouth(), ll.lng]]) },
+    { id: 'se', pos: b => b.getSouthEast(), constrain: (ll, b) => L.latLngBounds([[b.getNorth(), b.getWest()], [ll.lat, ll.lng]]) },
+    { id: 'sw', pos: b => b.getSouthWest(), constrain: (ll, b) => L.latLngBounds([[b.getNorth(), ll.lng], [ll.lat, b.getEast()]]) },
+    { id: 'n',  pos: b => L.latLng((b.getNorth()), (b.getWest() + b.getEast()) / 2),
+                constrain: (ll, b) => L.latLngBounds([[ll.lat, b.getWest()], [b.getSouth(), b.getEast()]]) },
+    { id: 's',  pos: b => L.latLng((b.getSouth()), (b.getWest() + b.getEast()) / 2),
+                constrain: (ll, b) => L.latLngBounds([[b.getNorth(), b.getWest()], [ll.lat, b.getEast()]]) },
+    { id: 'e',  pos: b => L.latLng((b.getNorth() + b.getSouth()) / 2, b.getEast()),
+                constrain: (ll, b) => L.latLngBounds([[b.getNorth(), b.getWest()], [b.getSouth(), ll.lng]]) },
+    { id: 'w',  pos: b => L.latLng((b.getNorth() + b.getSouth()) / 2, b.getWest()),
+                constrain: (ll, b) => L.latLngBounds([[b.getNorth(), ll.lng], [b.getSouth(), b.getEast()]]) },
+  ];
+
+  function placeHandles() {
+    handles.forEach(h => map.removeLayer(h));
+    handles = [];
+    if (!rectBounds) return;
+
+    handleDefs.forEach(def => {
+      const m = L.marker(def.pos(rectBounds), {
+        icon: handleIcon,
+        draggable: true,
+        zIndexOffset: 1000
+      }).addTo(map);
+
+      m.on('drag', e => {
+        rectBounds = def.constrain(e.latlng, rectBounds);
+        redrawRect();
+        // update other handle positions while dragging
+        handles.forEach((h, i) => {
+          h.setLatLng(handleDefs[i].pos(rectBounds));
+        });
+        updatePointsUI();
+      });
+
+      handles.push(m);
+    });
+  }
+
+  function clearSelection() {
+    drawing = false;
+    drawStart = null;
+    if (rectLayer) { map.removeLayer(rectLayer); rectLayer = null; }
+    handles.forEach(h => map.removeLayer(h));
+    handles = [];
+    rectBounds = null;
+    if (avyGeoJsonLayer) { map.removeLayer(avyGeoJsonLayer); avyGeoJsonLayer = null; }
+    map.getContainer().style.cursor = '';
+    map.dragging.enable();
+    selectAreaBtn.textContent = 'Draw Area';
+    selectAreaBtn.classList.remove('active');
+    updatePointsUI();
+  }
+
+  selectAreaBtn.addEventListener('click', () => {
+    if (drawing) {
+      drawing = false;
+      map.getContainer().style.cursor = '';
+      map.dragging.enable();
+      selectAreaBtn.textContent = 'Draw Area';
+      selectAreaBtn.classList.remove('active');
+    } else {
+      drawing = true;
+      map.dragging.disable();
+      map.getContainer().style.cursor = 'crosshair';
+      selectAreaBtn.textContent = 'Cancel Draw';
+      selectAreaBtn.classList.add('active');
+      showToast('Drag on the map to draw a rectangle');
+    }
+  });
+
+  clearBtn.addEventListener('click', clearSelection);
+
+  // Drag-to-draw
+  map.getContainer().addEventListener('mousedown', e => {
+    if (!drawing) return;
+    if (e.button !== 0) return;
+    drawStart = map.mouseEventToLatLng(e);
+    // clear any existing rect while drawing new one
+    if (rectLayer) { map.removeLayer(rectLayer); rectLayer = null; }
+    handles.forEach(h => map.removeLayer(h));
+    handles = [];
+    rectBounds = null;
+  });
+
+  map.getContainer().addEventListener('mousemove', e => {
+    if (!drawing || !drawStart) return;
+    const cur = map.mouseEventToLatLng(e);
+    rectBounds = L.latLngBounds([drawStart, cur]);
+    redrawRect();
+    updatePointsUI();
+  });
+
+  map.getContainer().addEventListener('mouseup', e => {
+    if (!drawing || !drawStart) return;
+    const cur = map.mouseEventToLatLng(e);
+    rectBounds = L.latLngBounds([drawStart, cur]);
+    drawStart = null;
+    drawing = false;
+    map.dragging.enable();
+    map.getContainer().style.cursor = '';
+    selectAreaBtn.textContent = 'Draw Area';
+    selectAreaBtn.classList.remove('active');
+    redrawRect();
+    placeHandles();
+    updatePointsUI();
+    showToast('Drag handles to resize');
+  });
+
+  // ── Get Avalanche Terrain ────────────────────────────────────────
+  avyBtn.addEventListener('click', async () => {
+    if (!rectBounds) return;
+    const payload = {
+      north_lat: String(rectBounds.getNorth()),
+      south_lat: String(rectBounds.getSouth()),
+      east_lon:  String(rectBounds.getEast()),
+      west_lon:  String(rectBounds.getWest())
+    };
+
+    avyBtn.disabled = true;
     responseBox.className = '';
-    responseBox.textContent = 'Sending…';
+    responseBox.textContent = 'Requesting…';
 
     try {
-      const res = await fetch('/api/avalanche-test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message })
-      });
+      const params = new URLSearchParams(payload);
+      const res = await fetch(`/api/avy-ter?${params}`);
 
       const text = await res.text();
 
-      try {
-        const json = JSON.parse(text);
-        responseBox.textContent = JSON.stringify(json, null, 2);
-      } catch {
-        responseBox.textContent = text;
+      if (!res.ok) {
+        responseBox.textContent = `Error ${res.status}: ${text}`;
+        responseBox.className = 'error';
+        showToast(`Error ${res.status}`);
+        return;
       }
 
-      responseBox.className = res.ok ? 'has-content' : 'error';
+      // Parse and plot GeoJSON
+      const geojson = JSON.parse(text);
+
+      if (avyGeoJsonLayer) { map.removeLayer(avyGeoJsonLayer); }
+      avyGeoJsonLayer = L.geoJSON(geojson, {
+        style: {
+          color: '#f59e0b',
+          weight: 1.5,
+          fillColor: '#f59e0b',
+          fillOpacity: 0.35
+        },
+        pointToLayer: (feature, latlng) =>
+          L.circleMarker(latlng, { radius: 5, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.8 })
+      }).addTo(map);
+
+      if (avyGeoJsonLayer.getBounds().isValid()) {
+        map.fitBounds(avyGeoJsonLayer.getBounds(), { padding: [24, 24] });
+      }
+
+      responseBox.textContent = JSON.stringify(geojson, null, 2);
+      responseBox.className = 'has-content';
+      showToast('Avalanche terrain loaded');
     } catch (err) {
       responseBox.textContent = `Error: ${err.message}`;
       responseBox.className = 'error';
+      showToast('Request failed');
     } finally {
-      sendBtn.disabled = false;
+      avyBtn.disabled = !rectBounds;
     }
-  }
+  });
 
-  sendBtn.addEventListener('click', sendMessage);
-  msgInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendMessage();
+  // ── Test endpoint ────────────────────────────────────────────────
+  const testBtn      = document.getElementById('test-btn');
+  const testResponse = document.getElementById('test-response');
+
+  testBtn.addEventListener('click', async () => {
+    testBtn.disabled = true;
+    testResponse.value = 'Sending…';
+    try {
+      const res  = await fetch('/api/avalanche-test', { method: 'POST' });
+      const text = await res.text();
+      try {
+        testResponse.value = JSON.stringify(JSON.parse(text), null, 2);
+      } catch {
+        testResponse.value = text;
+      }
+    } catch (err) {
+      testResponse.value = `Error: ${err.message}`;
+    } finally {
+      testBtn.disabled = false;
+    }
   });
 
   // Toast

@@ -221,17 +221,13 @@ impl AvalancheTerrain {
         Ok(AvalancheTerrain {avalanche_dataset: slope_dataset, geo_json_out: feature})
     }
 
-    pub fn from_lat_lon(api_key: &str, (lat_north, lon_east, lat_south, lon_west) : (f64, f64, f64, f64)) -> Result<AvalancheTerrain, Box<dyn std::error::Error>> {
+    pub async fn from_lat_lon(api_key: &str, (lat_north, lon_east, lat_south, lon_west) : (f64, f64, f64, f64)) -> Result<AvalancheTerrain, Box<dyn std::error::Error>> {
         let request = slope_angle_helpers::build_open_topo_get_request(lon_west, lon_east, lat_north, lat_south, api_key);
-        let open_topo_req = reqwest::blocking::get(request);
-        let Ok(response) = open_topo_req else {
-            println!("Got an error return!");
-            return Err("Uhhh".into());
-        };
+        let response = reqwest::get(request).await?;
 
         println!("Response code: {}", response.status());
 
-        let geo_tiff = response.bytes()?;
+        let geo_tiff = response.bytes().await?;
 
         // File gets deleted when it goes out of scope, which is ok because we copy to a new
         // dataset when making the avalanche dataset

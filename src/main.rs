@@ -33,13 +33,13 @@ struct Args {
     output_path: Option<String>
 }
 
-fn get_from_args(args: &Args, open_topo_api_key: &String) {
+async fn get_from_args(args: &Args, open_topo_api_key: &String) {
     let (north_lat, south_lat, east_lon, west_lon) = match (args.north_lat, args.south_lat, args.east_lon, args.west_lon) {
         (Some(n), Some(s), Some(e), Some(w)) => (n,s, e, w),
         _ => unreachable!("Whoops this shouldn't happen"),
     };
 
-    let Ok(requested_terrain) =  crate::slope_angles::AvalancheTerrain::from_lat_lon(open_topo_api_key.as_str(), (north_lat, east_lon, south_lat, west_lon)) else {
+    let Ok(requested_terrain) =  crate::slope_angles::AvalancheTerrain::from_lat_lon(open_topo_api_key.as_str(), (north_lat, east_lon, south_lat, west_lon)).await else {
         println!("unable to get avy terrain");
         return;
     };
@@ -66,9 +66,57 @@ use axum::extract::{Path, Query, Json};
 use std::collections::HashMap;
 use tower_http::services::ServeDir;
 use tower_http::services::ServeFile;
+use serde_json::Value;
+use axum::http::StatusCode;
 
-async fn get_avalanche_geojson(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
-    "Whoops"
+async fn get_avalanche_geojson(Query(coordinates): Query<HashMap<String, String>>) -> Result<Json<Value>, StatusCode>  {
+    println!("Received request for avy terrain");
+    let north_lat: f64 = match coordinates.get("north_lat") {
+        Some(v) => v.parse().unwrap(),
+        None => {
+            println!("North lat not found");
+            return Err(StatusCode::NOT_FOUND)
+        }
+    };
+    let south_lat: f64 = match coordinates.get("south_lat") {
+        Some(v) => v.parse().unwrap(),
+        None => {
+            println!("South lat not found");
+            return Err(StatusCode::NOT_FOUND)
+        }
+    };
+    let east_lon: f64 = match coordinates.get("east_lon") {
+        Some(v) => v.parse().unwrap(),
+        None => {
+            println!("East lon not found");
+            return Err(StatusCode::NOT_FOUND)
+        }
+    };
+    let west_lon: f64 = match coordinates.get("west_lon") {
+        Some(v) => v.parse().unwrap(),
+        None => {
+            println!("West lon not found");
+            return Err(StatusCode::NOT_FOUND)
+        }
+    };
+
+    println!("Request: north: {}, south: {}, east: {}, west: {}", north_lat, south_lat, east_lon, west_lon);
+
+    let _ = dotenvy::dotenv();
+    let Ok(open_topo_api_key) =  dotenvy::var("OPEN_TOPO_KEY") else {
+        eprintln!("Please add an open topo API key to your .env!");
+        return Err(StatusCode::NOT_FOUND)
+    };
+
+    let Ok(requested_terrain) =  crate::slope_angles::AvalancheTerrain::from_lat_lon(open_topo_api_key.as_str(), (north_lat, east_lon, south_lat, west_lon)).await else {
+        println!("unable to get avy terrain");
+        return Err(StatusCode::NOT_FOUND)
+    };
+
+    // Serialize to string
+    let geojson_string = requested_terrain.geo_json_out.to_string();
+    let value: Value = serde_json::from_str(&geojson_string.to_string()).unwrap();
+    Ok(Json(value))
 }
 
 async fn test_api_request() -> impl IntoResponse {
@@ -76,7 +124,6 @@ async fn test_api_request() -> impl IntoResponse {
     "Hello world"
 }
 
-#[tokio::main]
 async fn start_webserver(ip: &String, port: &String, api_key: &String) {
     println!("Starting web server on {ip}:{port}");
     let app = Router::new()
@@ -87,7 +134,8 @@ async fn start_webserver(ip: &String, port: &String, api_key: &String) {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let _ = dotenvy::dotenv();
     let Ok(open_topo_api_key) =  dotenvy::var("OPEN_TOPO_KEY") else {
         eprintln!("Please add an open topo API key to your .env!");
@@ -100,10 +148,10 @@ fn main() {
             (Some(i), Some(p)) => (i, p),
             _ => unreachable!("Whoops"),
         };
-        start_webserver(&ip, &port, &open_topo_api_key);
+        start_webserver(&ip, &port, &open_topo_api_key).await;
     }
     else {
-        get_from_args(&args, &open_topo_api_key);
+        get_from_args(&args, &open_topo_api_key).await;
     }
 
 }
