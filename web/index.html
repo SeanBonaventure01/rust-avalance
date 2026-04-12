@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Map Viewer</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:     #0d0f14;
+      --panel:  #141720;
+      --border: #232736;
+      --accent: #4af0a4;
+      --text:   #e8eaf0;
+      --muted:  #6b7280;
+      --radius: 8px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Syne', sans-serif;
+      overflow: hidden;
+    }
+
+    #app {
+      display: grid;
+      grid-template-rows: 56px 1fr;
+      grid-template-columns: 320px 1fr;
+      height: 100vh;
+    }
+
+    /* Top bar */
+    #topbar {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      z-index: 900;
+    }
+
+    .logo {
+      font-size: 1.1rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+    .logo span { color: var(--text); }
+
+    #search-wrap {
+      flex: 1;
+      max-width: 480px;
+      display: flex;
+      gap: 8px;
+    }
+
+    #search-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 14px;
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 0.8rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #search-input:focus { border-color: var(--accent); }
+    #search-input::placeholder { color: var(--muted); }
+
+    #search-btn {
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: var(--radius);
+      padding: 8px 16px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.8rem;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      transition: opacity 0.15s;
+    }
+    #search-btn:hover { opacity: 0.85; }
+
+    .coords-badge {
+      margin-left: auto;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.7rem;
+      color: var(--muted);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 6px 12px;
+      white-space: nowrap;
+    }
+    .coords-badge strong { color: var(--accent); }
+
+    /* Sidebar */
+    #sidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .panel-title {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    #msg-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      font-size: 0.8rem;
+      outline: none;
+      resize: none;
+      transition: border-color 0.2s;
+      min-height: 72px;
+    }
+    #msg-input:focus { border-color: var(--accent); }
+    #msg-input::placeholder { color: var(--muted); }
+
+    #send-btn {
+      width: 100%;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: var(--radius);
+      padding: 10px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      letter-spacing: 0.06em;
+      transition: opacity 0.15s;
+    }
+    #send-btn:hover { opacity: 0.85; }
+    #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #response-box {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.6;
+      min-height: 120px;
+    }
+    #response-box.has-content { color: var(--text); }
+    #response-box.error { color: #f87171; border-color: #f87171; }
+
+    .zoom-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .zoom-btn {
+      width: 36px; height: 36px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 1.2rem;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+    #zoom-level {
+      font-family: 'Space Mono', monospace;
+      font-size: 0.85rem;
+      color: var(--accent);
+      min-width: 28px;
+      text-align: center;
+    }
+
+    #map { position: relative; z-index: 1; }
+
+    .leaflet-control-zoom { display: none; }
+    .leaflet-control-attribution {
+      background: rgba(13,15,20,0.75) !important;
+      color: var(--muted) !important;
+      font-size: 0.65rem !important;
+    }
+    .leaflet-control-attribution a { color: var(--accent) !important; }
+
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--panel);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 10px 20px;
+      font-size: 0.8rem;
+      color: var(--accent);
+      font-family: 'Space Mono', monospace;
+      z-index: 2000;
+      transition: transform 0.3s ease;
+      pointer-events: none;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    #sidebar::-webkit-scrollbar { width: 4px; }
+    #sidebar::-webkit-scrollbar-track { background: transparent; }
+    #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    #response-box::-webkit-scrollbar { width: 4px; }
+    #response-box::-webkit-scrollbar-track { background: transparent; }
+    #response-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <header id="topbar">
+    <div class="logo">Map<span>View</span></div>
+    <div id="search-wrap">
+      <input id="search-input" type="text" placeholder="Search a place…" />
+      <button id="search-btn">Go</button>
+    </div>
+    <div class="coords-badge">
+      <strong id="lat-display">47.6062</strong> N &nbsp;
+      <strong id="lng-display">122.3321</strong> W &nbsp;|&nbsp; Z<strong id="z-display">12</strong>
+    </div>
+  </header>
+
+  <aside id="sidebar">
+
+    <div>
+      <div class="panel-title">Zoom</div>
+      <div class="zoom-row">
+        <button class="zoom-btn" id="zoom-out">−</button>
+        <span id="zoom-level">12</span>
+        <button class="zoom-btn" id="zoom-in">+</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px;flex:1;">
+      <div class="panel-title">Avalanche Test</div>
+      <textarea id="msg-input" placeholder="Enter a message…"></textarea>
+      <button id="send-btn">Send</button>
+      <div class="panel-title" style="margin-top:4px;">Response</div>
+      <div id="response-box">Waiting for response…</div>
+    </div>
+
+  </aside>
+
+  <div id="map"></div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+  // Map
+  const map = L.map('map', {
+    center: [47.6062, -122.3321],
+    zoom: 12,
+    zoomControl: false,
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19
+  }).addTo(map);
+
+  function updateCoords() {
+    const c = map.getCenter();
+    const z = map.getZoom();
+    document.getElementById('lat-display').textContent = Math.abs(c.lat).toFixed(4);
+    document.getElementById('lng-display').textContent = Math.abs(c.lng).toFixed(4);
+    document.getElementById('z-display').textContent   = z;
+    document.getElementById('zoom-level').textContent  = z;
+  }
+  map.on('moveend zoomend', updateCoords);
+  updateCoords();
+
+  document.getElementById('zoom-in').addEventListener('click',  () => map.zoomIn());
+  document.getElementById('zoom-out').addEventListener('click', () => map.zoomOut());
+
+  // Map search
+  async function doSearch() {
+    const q = document.getElementById('search-input').value.trim();
+    if (!q) return;
+    showToast('Searching…');
+    try {
+      const res  = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`, {
+        headers: { 'Accept-Language': 'en' }
+      });
+      const data = await res.json();
+      if (!data.length) { showToast('Place not found'); return; }
+      const { lat, lon, display_name } = data[0];
+      map.flyTo([+lat, +lon], 13, { duration: 1.4 });
+      L.marker([+lat, +lon]).addTo(map).bindPopup(display_name).openPopup();
+      showToast(display_name.split(',')[0]);
+    } catch {
+      showToast('Search failed');
+    }
+  }
+
+  document.getElementById('search-btn').addEventListener('click', doSearch);
+  document.getElementById('search-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+  });
+
+  // Send to /avalance-test
+  const sendBtn     = document.getElementById('send-btn');
+  const msgInput    = document.getElementById('msg-input');
+  const responseBox = document.getElementById('response-box');
+
+  async function sendMessage() {
+    const message = msgInput.value.trim();
+    if (!message) return;
+
+    sendBtn.disabled = true;
+    responseBox.className = '';
+    responseBox.textContent = 'Sending…';
+
+    try {
+      const res = await fetch('/api/avalanche-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+
+      const text = await res.text();
+
+      try {
+        const json = JSON.parse(text);
+        responseBox.textContent = JSON.stringify(json, null, 2);
+      } catch {
+        responseBox.textContent = text;
+      }
+
+      responseBox.className = res.ok ? 'has-content' : 'error';
+    } catch (err) {
+      responseBox.textContent = `Error: ${err.message}`;
+      responseBox.className = 'error';
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  msgInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendMessage();
+  });
+
+  // Toast
+  let toastTimer;
+  function showToast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  }
+</script>
+</body>
+</html>

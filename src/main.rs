@@ -56,8 +56,35 @@ fn get_from_args(args: &Args, open_topo_api_key: &String) {
     };
 }
 
-fn start_webserver(ip: &String, port: &String, api_key: &String) {
+use axum::{
+    routing::get,
+    routing::post,
+    Router,
+    response::IntoResponse
+};
+use axum::extract::{Path, Query, Json};
+use std::collections::HashMap;
+use tower_http::services::ServeDir;
+use tower_http::services::ServeFile;
+
+async fn get_avalanche_geojson(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    "Whoops"
+}
+
+async fn test_api_request() -> impl IntoResponse {
+    println!("Got request!");
+    "Hello world"
+}
+
+#[tokio::main]
+async fn start_webserver(ip: &String, port: &String, api_key: &String) {
     println!("Starting web server on {ip}:{port}");
+    let app = Router::new()
+        .route("/api/avalanche-test", post(test_api_request))
+        .route("/api/avy-ter", get(get_avalanche_geojson));
+    
+    let listener = tokio::net::TcpListener::bind(format!("{ip}:{port}")).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
 fn main() {
